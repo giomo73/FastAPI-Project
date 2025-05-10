@@ -14,6 +14,11 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
+# ✅ Route principale per la homepage
+@app.get("/")
+def home():
+    return {"message": "API FastAPI live - Benvenuto!"}
+
 # Middleware CORS per React frontend
 app.add_middleware(
     CORSMiddleware,
