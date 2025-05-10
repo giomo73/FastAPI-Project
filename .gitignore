@@ -1,0 +1,45 @@
+# Ambiente virtuale
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# Cache di Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# File temporanei
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Database SQLite
+*.db
+
+# Configurazione locale
+*.env
+.env.*
+
+# VSCode
+.vscode/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# MyPy e altri tool
+.mypy_cache/
+.dmypy.json
+.pyre/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
