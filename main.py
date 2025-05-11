@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from passlib.context import CryptContext
 from passlib.exc import UnknownHashError
 from database import SessionLocal
+from database import get_db
 
 Base.metadata.create_all(bind=engine)
 
@@ -126,3 +127,14 @@ def radera_fordon(kund_id: int, registreringsnummer: str, db: Session = Depends(
     db.delete(fordon)
     db.commit()
     return {"ok": True}
+    
+@app.get("/debug/db")
+def debug_db(db: Session = Depends(get_db)):
+    try:
+        users = db.query(Anvandare).all()
+        return {
+            "count": len(users),
+            "emails": [user.email for user in users]
+        }
+    except Exception as e:
+        return {"error": str(e)}
