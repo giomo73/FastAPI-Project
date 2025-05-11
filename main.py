@@ -1,14 +1,15 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from database import SessionLocal, engine, Base
+from database import Base, engine
 from models import Kund, Fordon, Anvandare
-from auth import get_current_user, create_access_token, verify_password_argon2, verify_password_bcrypt, get_password_hash, router as auth_router
+from auth import get_current_user, create_access_token, verify_password_argon2, verify_password_bcrypt, get_password_hash, auth_router
 from datetime import date
 from schemas.schemas import AnvandareRegistrering, FordonSkapa
 from fastapi.middleware.cors import CORSMiddleware
 from passlib.context import CryptContext
 from passlib.exc import UnknownHashError
+from database import SessionLocal
 
 Base.metadata.create_all(bind=engine)
 
@@ -22,7 +23,10 @@ def home():
 # Middleware CORS per React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "https://sts-orebro.onrender.com"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -51,31 +55,6 @@ def register_anvandare(data: AnvandareRegistrering, db: Session = Depends(get_db
     db.commit()
     db.refresh(anvandare)
     return {"msg": "Användare skapad"}
-
-@app.post("/login")
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    email = form_data.username
-    password = form_data.password
-    user = db.query(Anvandare).filter(Anvandare.email == email).first()
-
-    if not user:
-        raise HTTPException(status_code=401, detail="Felaktiga inloggningsuppgifter")
-
-    hashed_password = user.hashed_password
-    verified = False
-
-    if verify_password_argon2(password, hashed_password):
-        verified = True
-    elif verify_password_bcrypt(password, hashed_password):
-        verified = True
-        user.hashed_password = get_password_hash(password)
-        db.commit()
-
-    if not verified:
-        raise HTTPException(status_code=401, detail="Felaktiga inloggningsuppgifter")
-
-    token = create_access_token({"sub": user.email})
-    return {"access_token": token, "token_type": "bearer"}
 
 @app.get("/me")
 def get_me(current_anvandare: Anvandare = Depends(get_current_user)):
