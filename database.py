@@ -3,16 +3,23 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 
-# Connessione al DB da variabile d'ambiente o fallback
-SQLALCHEMY_DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://verkstad_db_user:2d3z9ykneIOHmIHK0SeFp6fYYwGeBxvz@dpg-d0g6d4adbo4c73b2hnig-a.frankfurt-postgres.render.com:5432/verkstad_db"
+# ✅ Recupera la stringa di connessione dal sistema
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not SQLALCHEMY_DATABASE_URL:
+    raise RuntimeError("DATABASE_URL non è impostata nelle variabili di ambiente.")
+
+# ✅ Crea il motore con SSL abilitato per Render
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"sslmode": "require"}
 )
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"sslmode": "require"})
+# Sessione e base dichiarativa per SQLAlchemy
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# Funzione generatore per ottenere la sessione DB
 def get_db():
     db = SessionLocal()
     try:
