@@ -25,7 +25,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "https://sts-orebro.onrender.com"
+        "https://fastapi-project-1-qd8d.onrender.com/"
     ],
     allow_credentials=True,
     allow_methods=["*"],
