@@ -163,4 +163,6 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         raise HTTPException(status_code=401, detail="Felaktiga inloggningsuppgifter")
 
     token = create_access_token({"sub": user.email})
+    print("==> Richiesta ricevuta su /login")
+    
     return {"access_token": token, "token_type": "bearer"}
