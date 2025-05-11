@@ -26,7 +26,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "https://fastapi-project-1-qd8d.onrender.com/"
+        "https://frontend-1-xyej.onrender.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
