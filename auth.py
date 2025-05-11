@@ -2,70 +2,57 @@ from fastapi import Depends, HTTPException, status, APIRouter, Body
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from itsdangerous import URLSafeTimedSerializer
-from mailer import send_reset_email  # Aggiunto per invio email
-from passlib.exc import UnknownHashError  # Importa correttamente l'eccezione
+from passlib.context import CryptContext
+from passlib.exc import UnknownHashError
+
+from mailer import send_reset_email
 from models import Anvandare
 from database import get_db
-from database import SessionLocal
 from hashing import get_password_hash
 
 # === Configurazione token ===
 SECRET_KEY = "supersecretkey"  # Cambia in produzione
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
-serializer = URLSafeTimedSerializer(SECRET_KEY)  # Per generare il link di reset password
+serializer = URLSafeTimedSerializer(SECRET_KEY)
 
-# Definisci contesti separati per bcrypt e argon2
+# === Password contexts ===
 bcrypt_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+argon2_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
+# === OAuth2 ===
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 auth_router = APIRouter()
 
-# === Gestione DB ===
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-# === Password ===
+# === Utility Password ===
 def verify_password_argon2(plain_password, hashed_password):
     try:
-        return pwd_context.verify(plain_password, hashed_password)
+        return argon2_context.verify(plain_password, hashed_password)
     except UnknownHashError:
-        return False  # Indica che l'hash non è argon2
+        return False
 
 def verify_password_bcrypt(plain_password, hashed_password):
     try:
         return bcrypt_context.verify(plain_password, hashed_password)
     except UnknownHashError:
-        return False # Indica che l'hash non è bcrypt
-
-def get_password_hash(password):
-    # Crea un nuovo hash usando argon2
-    return pwd_context.hash(password)
+        return False
 
 def update_password_if_needed(user: Anvandare, password: str, db: Session):
-    # Se la password non è hashata con argon2, aggiornala
-    if not pwd_context.identify(user.hashed_password):
+    if not argon2_context.identify(user.hashed_password):
         print("Password hash outdated, updating to argon2...")
         user.hashed_password = get_password_hash(password)
         db.commit()
 
-# === JWT ===
+# === JWT Token generation ===
 def create_access_token(data: dict, expires_delta: timedelta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)):
     to_encode = data.copy()
     expire = datetime.utcnow() + expires_delta
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-# === Current User ===
+# === Current user extraction ===
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -75,21 +62,24 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
-        if email is None:
+        if not email:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
+
     user = db.query(Anvandare).filter(Anvandare.email == email).first()
-    if user is None:
+    if not user:
         raise credentials_exception
     return user
 
-# === Registrazione utente con ruolo ===
+# === ROUTES ===
+
+# 🔐 REGISTRAZIONE
 @auth_router.post("/register")
 def register_anvandare(data: dict = Body(...), db: Session = Depends(get_db)):
     email = data.get("email")
     password = data.get("password")
-    role = data.get("role", "user")  # Assegna "user" come ruolo di default
+    role = data.get("role", "user")
 
     if db.query(Anvandare).filter(Anvandare.email == email).first():
         raise HTTPException(status_code=400, detail="Email redan registrerad")
@@ -103,7 +93,29 @@ def register_anvandare(data: dict = Body(...), db: Session = Depends(get_db)):
 
     return {"msg": "Användare skapad", "email": user.email, "role": user.role}
 
-# === Reset Password Request ===
+# 🔐 LOGIN
+@auth_router.post("/login")
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    print("==> Richiesta ricevuta su /login")
+    email = form_data.username
+    password = form_data.password
+
+    user = db.query(Anvandare).filter(Anvandare.email == email).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Felaktiga inloggningsuppgifter")
+
+    if verify_password_argon2(password, user.hashed_password):
+        pass
+    elif verify_password_bcrypt(password, user.hashed_password):
+        update_password_if_needed(user, password, db)
+    else:
+        raise HTTPException(status_code=401, detail="Felaktiga inloggningsuppgifter")
+
+    token = create_access_token({"sub": user.email})
+    print("==> Login OK")
+    return {"access_token": token, "token_type": "bearer"}
+
+# 🔐 RESET PASSWORD - richiesta
 @auth_router.post("/reset-password-request")
 async def reset_password_request(data: dict = Body(...), db: Session = Depends(get_db)):
     email = data.get("email")
@@ -113,13 +125,11 @@ async def reset_password_request(data: dict = Body(...), db: Session = Depends(g
 
     token = serializer.dumps(email, salt="reset-password")
     reset_link = f"http://localhost:5173/reset-password?token={token}"
-
-    # Invia email reale
     await send_reset_email(email, reset_link)
 
     return {"message": "Länk skickad"}
 
-# === Reset Password ===
+# 🔐 RESET PASSWORD - conferma
 @auth_router.post("/reset-password")
 def reset_password(data: dict = Body(...), db: Session = Depends(get_db)):
     token = data.get("token")
@@ -139,30 +149,8 @@ def reset_password(data: dict = Body(...), db: Session = Depends(get_db)):
 
     return {"message": "Lösenord uppdaterat"}
 
-@auth_router.post("/login")
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    print("==> Richiesta ricevuta su /login")
-    email = form_data.username
-    password = form_data.password
-    user = db.query(Anvandare).filter(Anvandare.email == email).first()
-
-    if not user:
-        raise HTTPException(status_code=401, detail="Felaktiga inloggningsuppgifter")
-
-    hashed_password = user.hashed_password
-    verified = False
-
-    if verify_password_argon2(password, hashed_password):
-        verified = True
-    elif verify_password_bcrypt(password, hashed_password):
-        verified = True
-        user.hashed_password = get_password_hash(password)
-        db.commit()
-
-    if not verified:
-        raise HTTPException(status_code=401, detail="Felaktiga inloggningsuppgifter")
-
-    token = create_access_token({"sub": user.email})
-    print("==> Richiesta ricevuta su /login")
-    
-    return {"access_token": token, "token_type": "bearer"}
+# 🐞 DEBUG - Vedi utenti registrati
+@auth_router.get("/debug/users", tags=["Debug"])
+def debug_get_users(db: Session = Depends(get_db)):
+    users = db.query(Anvandare).all()
+    return [{"id": u.id, "email": u.email, "role": u.role} for u in users]
